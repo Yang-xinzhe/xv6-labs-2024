@@ -131,15 +131,89 @@ runcmd(struct cmd *cmd)
   exit(0);
 }
 
-int
-getcmd(char *buf, int nbuf)
-{
-  write(2, "$ ", 2);
-  memset(buf, 0, nbuf);
-  gets(buf, nbuf);
-  if(buf[0] == 0) // EOF
-    return -1;
-  return 0;
+char *cmds[] = {
+    "cat        ",
+    "echo       ",
+    "forktest   ",
+    "grep       ",
+    "init     ",
+    "kill     ",
+    "ln       ",
+    "ls       ",
+    "mkdir    ",
+    "rm       ",
+    "sh       ",
+    "stressfs ",
+    "usertests4",
+    "grind    ",
+    "wc       ",
+    "zombie   ",
+    "sleep    ",
+    "pingpong ",
+    "primes   ",
+    "find     ",
+    "xargs    ",
+    "uptime   "
+};
+
+char *complete(char *buf, int *idx) {
+  char *NULL = "NULL";
+  for(int i = 0; cmds[i] ; i++) {
+      if(strncmp(buf, cmds[i], strlen(buf)) == 0) {
+        return cmds[i];
+      }
+  }
+  return NULL;
+}
+
+
+// int
+// getcmd(char *buf, int nbuf)
+// {
+//   write(2, "$ ", 2);
+//   memset(buf, 0, nbuf);
+//   gets(buf, nbuf);
+//   if(buf[0] == 0) // EOF
+//     return -1;
+//   return 0;
+// }
+
+int getcmd(char *buf, int nbuf) {
+    write(2, "=> ", 3);
+    memset(buf, 0, nbuf);
+
+    int idx = 0;
+    char c = 0;
+    while(1) {
+        if(read(0, &c, 1) < 1) {
+          break;
+        }
+        if(c == '\t'){
+          char *completion = complete(buf, &idx);
+          if(completion){
+              memset(buf, 0, sizeof(buf));
+              
+              strcpy(buf, completion);
+              idx = strlen(buf);
+              printf("\r=> %s", buf);
+          }
+          continue;
+        } else if (c == '\n') {
+          buf[idx++] = 0;
+          break;
+        } else if (c == 0x7f) {     // backspace
+          if(idx > 0){
+            idx--;
+            write(2, "\b \b", 3);
+          }
+        } else {
+          buf[idx++] = c;
+          write(2, &c, 1); // echo input to console.
+        }
+    }
+    buf[idx] = 0;
+    if (idx == 0) return -1;
+    return 0;
 }
 
 int

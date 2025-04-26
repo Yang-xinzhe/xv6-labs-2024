@@ -33,6 +33,13 @@ strcmp(const char *p, const char *q)
   return (uchar)*p - (uchar)*q;
 }
 
+int strncmp(const char *p, const char *q, int n) {
+  for(int i = 0 ; i < n ; i++) {
+    if(p[i] != q[i]) return p[i] - q[i];
+  }
+  return 0;
+}
+
 uint
 strlen(const char *s)
 {
