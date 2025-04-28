@@ -8,6 +8,9 @@ main(int argc, char *argv[])
 {
   // your code here.  you should write the secret to fd 2 using write
   // (e.g., write(2, secret, 8)
-
+  int n_pages = 17;
+  char *end = sbrk(n_pages * PGSIZE);
+  end += (n_pages - 1) * PGSIZE;
+  write(2, end + 32 , 8);
   exit(1);
 }
