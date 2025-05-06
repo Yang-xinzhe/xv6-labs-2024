@@ -170,6 +170,19 @@ panic(char *s)
     ;
 }
 
+void backtrace(void) {
+  uint64 fp;
+  fp = r_fp();
+  uint64 addr;
+  printf("backtrace:\n");
+
+  while(PGROUNDUP(fp) - PGROUNDDOWN(fp) == PGSIZE) {
+    addr = *(uint64 *)(fp - 8);
+    printf("%p\n", (void *)addr);
+    fp = *(uint64 *)(fp - 16);
+  }
+}
+
 void
 printfinit(void)
 {
