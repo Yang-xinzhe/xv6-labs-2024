@@ -80,8 +80,10 @@ usertrap(void)
   if(which_dev == 2) {
     if(p->ticks > 0) {
       p->ticks_elapse++;
-      if(p->ticks_elapse > p->ticks) {
+      if(p->ticks_elapse > p->ticks && !p->alarm_flag) {
         p->ticks_elapse = 0;
+        *p->alarmframe = *p->trapframe;
+        p->alarm_flag = 1;
         p->trapframe->epc = (uint64)p->handler;
       }
     }

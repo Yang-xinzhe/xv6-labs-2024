@@ -108,4 +108,6 @@ struct proc {
   int ticks;                  // keep track
   int ticks_elapse;           // ticks elapse time;
   void (*handler)();          // alarm handler
+  struct trapframe *alarmframe; // alarm trapframe
+  int alarm_flag;             // Prevent re-entrant calls to the handler
 };
