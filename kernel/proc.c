@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -125,6 +129,9 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+  memset(p->vmas, 0, sizeof(p->vmas));
+  p->mmap_end = 0;
+
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -158,6 +165,17 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  for (int i = 0; i < MAXVMA; i++) {
+    struct vma *v = &p->vmas[i];
+    if (!v->used) continue;
+
+    for (uint64 a = v->start; a < v->start + v->len; a += PGSIZE) {
+      pte_t *pte = walk(p->pagetable, a, 0);
+      if (pte == 0 || (*pte & PTE_V) == 0) continue;
+      uvmunmap(p->pagetable, a, 1, 1);
+    }
+    memset(v, 0, sizeof(*v));
+  }
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -295,7 +313,13 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
-
+  np->mmap_end = p->mmap_end;
+  for(int i = 0 ; i < MAXVMA ; ++i) {
+    np->vmas[i] = p->vmas[i];
+    if(np->vmas[i].used && np->vmas[i].f){
+      np->vmas[i].f = filedup(np->vmas[i].f);
+    }
+  }
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 

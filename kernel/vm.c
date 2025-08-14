@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "fcntl.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "sleeplock.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -448,4 +453,48 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int handle_pgfault(int is_write) {
+  struct proc *p = myproc();
+  uint64 va = r_stval();
+  uint64 va0 = PGROUNDDOWN(va);
+  
+  struct vma *v = 0;
+  for(int i = 0 ; i < MAXVMA ; ++i) {
+    if(p->vmas[i].used &&
+       va0 >= p->vmas[i].start &&
+       va0 <  p->vmas[i].start + p->vmas[i].len) {
+        v = &p->vmas[i];
+        break;
+      }
+  }
+  if(!v) return -1;
+
+  if(is_write && !(v->prot & PROT_WRITE)) return -1;
+
+  pte_t *pte = walk(p->pagetable, va0, 0);
+  if(pte && (*pte & PTE_V)) {
+    if(is_write) *pte |= PTE_W;
+    return 0;
+  }
+
+  char *mem = kalloc();
+  if(!mem) return -1;
+  memset(mem, 0, PGSIZE);
+
+  if (v->f && v->f->ip) {
+    uint off = v->off + (va0 - v->start);
+    ilock(v->f->ip);
+    int n = readi(v->f->ip, 0, (uint64)mem, off, PGSIZE);
+    iunlock(v->f->ip);
+    if (n < 0) { kfree(mem); return -1; }
+  }
+
+  int perm = PTE_U | PTE_R;
+  if(mappages(p->pagetable, va0, PGSIZE, (uint64)mem, perm) < 0) {
+    kfree(mem); return -1;
+  }
+
+  return 0;
 }

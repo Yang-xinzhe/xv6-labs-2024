@@ -503,3 +503,133 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64 sys_mmap(void) {
+  uint64 uaddr, off;
+  int len, prot, flags, fd;
+
+  argaddr(0, &uaddr);
+  argint(1, &len);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+  argaddr(5, &off);
+ 
+  if(len <= 0) return (uint64)-1;
+  len = PGROUNDUP(len);
+  if(off % PGSIZE) return (uint64)-1;
+
+  struct proc *p = myproc();
+  if(fd < 0 || fd >= NOFILE || p->ofile[fd] == 0) return (uint64)-1;
+  struct file *f = p->ofile[fd];
+
+  if((flags & MAP_SHARED) && (prot & PROT_WRITE) && !f->writable)
+    return (uint64)-1;
+
+  uint64 va = uaddr;
+  if(va == 0) {
+    if(p->mmap_end == 0) {
+      p->mmap_end = PGROUNDUP(p->sz);
+    } 
+    va = PGROUNDUP(p->mmap_end);
+    p->mmap_end = va + len;
+  } else {
+    if(va % PGSIZE) return (uint64)-1;
+  }
+
+  struct vma *v = 0;
+  for(int i = 0 ; i < MAXVMA ; ++i) {
+    if(!p->vmas[i].used) { v = &p->vmas[i]; break;}
+  }
+  if(!v) return (uint64)-1;
+
+  v->start = va;
+  v->len = len;
+  v->prot = prot;
+  v->flags = flags;
+  v->f = filedup(f);
+  v->off = off;
+  v->used = 1;
+
+  return va;
+}
+
+uint64
+sys_munmap(void) {
+  uint64 uaddr; int len;
+argaddr(0, &uaddr);
+argint(1, &len);
+  if (len <= 0 || (uaddr % PGSIZE)) return -1;
+  len = PGROUNDUP(len);
+
+  struct proc *p = myproc();
+
+  for (int i = 0; i < MAXVMA; i++) {
+    struct vma *v = &p->vmas[i];
+    if (!v->used) continue;
+
+    uint64 vstart = v->start, vend = v->start + v->len;
+    uint64 rstart = uaddr,     rend = uaddr + len;
+    if (rstart < vstart || rend > vend) continue;
+
+    // 预取文件大小用于裁剪
+    struct inode *ip = v->f->ip;
+    int fsz;
+    ilock(ip);
+    fsz = ip->size;
+    iunlock(ip);
+
+    // 先逐页：如已映射，则必要时写回，再解除映射
+    uint64 vstart0 = v->start, voff0 = v->off;
+    for (uint64 a = rstart; a < rend; a += PGSIZE) {
+      pte_t *pte = walk(p->pagetable, a, 0);
+      if (!pte || !(*pte & PTE_V)) continue;
+
+      if ((v->flags & MAP_SHARED) && (v->prot & PROT_WRITE)) {
+        uint64 off = voff0 + (a - vstart0);
+        int wlen = 0;
+        if (off < (uint64)fsz) {
+          wlen = PGSIZE;
+          if (off + wlen > (uint64)fsz) wlen = fsz - off;
+        }
+        if (wlen > 0) {
+          begin_op();
+          ilock(ip);
+          writei(ip, 1, a, off, wlen);
+          iunlock(ip);
+          end_op();
+        }
+      }
+
+      uvmunmap(p->pagetable, a, 1, 1);
+    }
+
+    // 再更新/分裂 VMA
+    if (rstart == vstart && rend == vend) {
+      fileclose(v->f);
+      memset(v, 0, sizeof(*v));
+    } else if (rstart == vstart) {
+      v->start = vstart + len;
+      v->off   = voff0 + len;
+      v->len   = v->len - len;
+    } else if (rend == vend) {
+      v->len   = v->len - len;
+    } else {
+      struct vma *nv = 0;
+      for (int j = 0; j < MAXVMA; j++) if (!p->vmas[j].used) { nv = &p->vmas[j]; break; }
+      if (!nv) return -1;
+      nv->start = rend;
+      nv->len   = vend - rend;
+      nv->prot  = v->prot;
+      nv->flags = v->flags;
+      nv->f     = filedup(v->f);
+      nv->off   = voff0 + (nv->start - vstart);
+      nv->used  = 1;
+      v->len    = rstart - vstart;
+    }
+
+    return 0;
+  }
+
+  return -1;
+}
